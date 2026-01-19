@@ -64,13 +64,39 @@ import {
 
 import { TimelineColumn } from "./components/TimelineColumn";
 
+// Helper to get date offset from today
+const getDateOffset = (offset: number): string => {
+  const date = new Date();
+  date.setDate(date.getDate() + offset);
+  return formatDate(date);
+};
+
 // Default data for initial state
 const defaultPlanBlocks: PlanBlock[] = [
+  // Single-day plans for today
   { id: "p1", title: "화학1", description: "원자 기출Pick 화학 1\n32~38", start: 9 * 60, end: 10 * 60 + 20, color: "bg-pink-200", date: getToday() },
   { id: "p2", title: "사회문화 수행", description: "평가 준비", start: 10 * 60 + 20, end: 11 * 60 + 10, color: "bg-green-200", date: getToday() },
   { id: "p3", title: "수능특강 문학", description: "6, 7 강", start: 17 * 60, end: 18 * 60, color: "bg-orange-200", date: getToday() },
   { id: "p4", title: "영어", description: "경선식 수능 영단어\nDay31~32", start: 18 * 60, end: 18 * 60 + 40, color: "bg-yellow-200", date: getToday() },
   { id: "p5", title: "공통수학1", description: "쎈 공통수학1\n20~28", start: 18 * 60 + 40, end: 20 * 60, color: "bg-blue-200", date: getToday() },
+
+  // Multi-day plan: 중간고사 준비 (3 days starting from today)
+  { id: "p6", title: "중간고사 준비", description: "과목별 정리 및 복습", start: 14 * 60, end: 16 * 60, color: "bg-purple-200", date: getDateOffset(0), groupId: "group-midterm" },
+  { id: "p7", title: "중간고사 준비", description: "과목별 정리 및 복습", start: 14 * 60, end: 16 * 60, color: "bg-purple-200", date: getDateOffset(1), groupId: "group-midterm" },
+  { id: "p8", title: "중간고사 준비", description: "과목별 정리 및 복습", start: 14 * 60, end: 16 * 60, color: "bg-purple-200", date: getDateOffset(2), groupId: "group-midterm" },
+
+  // Multi-day plan: 프로젝트 발표 준비 (4 days starting from tomorrow)
+  { id: "p9", title: "프로젝트 발표 준비", description: "PPT 제작 및 발표 연습", start: 10 * 60, end: 12 * 60, color: "bg-teal-200", date: getDateOffset(1), groupId: "group-presentation" },
+  { id: "p10", title: "프로젝트 발표 준비", description: "PPT 제작 및 발표 연습", start: 10 * 60, end: 12 * 60, color: "bg-teal-200", date: getDateOffset(2), groupId: "group-presentation" },
+  { id: "p11", title: "프로젝트 발표 준비", description: "PPT 제작 및 발표 연습", start: 10 * 60, end: 12 * 60, color: "bg-teal-200", date: getDateOffset(3), groupId: "group-presentation" },
+  { id: "p12", title: "프로젝트 발표 준비", description: "PPT 제작 및 발표 연습", start: 10 * 60, end: 12 * 60, color: "bg-teal-200", date: getDateOffset(4), groupId: "group-presentation" },
+
+  // Multi-day plan: 독서 챌린지 (5 days starting from yesterday)
+  { id: "p13", title: "독서 챌린지", description: "하루 30분 독서하기", start: 21 * 60, end: 21 * 60 + 30, color: "bg-amber-200", date: getDateOffset(-1), groupId: "group-reading" },
+  { id: "p14", title: "독서 챌린지", description: "하루 30분 독서하기", start: 21 * 60, end: 21 * 60 + 30, color: "bg-amber-200", date: getDateOffset(0), groupId: "group-reading" },
+  { id: "p15", title: "독서 챌린지", description: "하루 30분 독서하기", start: 21 * 60, end: 21 * 60 + 30, color: "bg-amber-200", date: getDateOffset(1), groupId: "group-reading" },
+  { id: "p16", title: "독서 챌린지", description: "하루 30분 독서하기", start: 21 * 60, end: 21 * 60 + 30, color: "bg-amber-200", date: getDateOffset(2), groupId: "group-reading" },
+  { id: "p17", title: "독서 챌린지", description: "하루 30분 독서하기", start: 21 * 60, end: 21 * 60 + 30, color: "bg-amber-200", date: getDateOffset(3), groupId: "group-reading" },
 ];
 
 const defaultExecutionBlocks: PlanBlock[] = [
