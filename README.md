@@ -1,36 +1,73 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 플래너 (Planner)
 
-## Getting Started
+일일 계획과 실행을 시각적으로 관리할 수 있는 타임라인 기반 플래너 앱입니다.
 
-First, run the development server:
+## 실행 방법
+
+### 요구 사항
+
+- Node.js 22.0 이상
+
+### 설치 및 실행
 
 ```bash
+# 의존성 설치
+npm install
+
+# 개발 서버 실행
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+브라우저에서 [http://localhost:3000](http://localhost:3000)을 열어 앱을 확인하세요.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### GitHub Repository
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+[https://github.com/herrineKim/planner](https://github.com/herrineKim/planner)
 
-## Learn More
+### 배포 링크
 
-To learn more about Next.js, take a look at the following resources:
+[planner-eta-jade.vercel.app](https://planner-eta-jade.vercel.app/)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## 주요 기능
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+### 타임라인 관리
 
-## Deploy on Vercel
+- **계획/실행 2열 구조**: 왼쪽에는 계획, 오른쪽에는 실행을 기록
+- **10분 단위 타임슬롯**: 세밀한 시간 관리 가능
+- **드래그로 시간 선택**: 타임라인에서 드래그하여 새로운 일정 생성
+- **블록 드래그 이동**: 생성된 일정을 드래그하여 시간 변경
+- **계획↔실행 전환**: 블록을 다른 열로 드래그하여 계획과 실행 간 이동
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### 일정 블록
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **제목 및 설명**: 최대 40자 제목, 200자 설명 입력 가능
+- **8가지 색상**: 핑크, 초록, 주황, 노랑, 파랑, 보라, 빨강, 청록
+- **겹치는 일정 표시**: 시간이 겹치는 일정은 나란히 표시
+- **클릭하여 수정/삭제**: 블록 클릭으로 상세 정보 편집
+
+### 여러 날 일정
+
+- **날짜 드래그 선택**: 주간 캘린더에서 여러 날을 드래그하여 다일 일정 생성
+- **접기/펼치기**: 많은 다일 일정은 접어서 관리
+- **클릭하여 편집**: 다일 일정 바를 클릭하여 수정/삭제
+
+### 날짜 탐색
+
+- **주간 캘린더 뷰**: 일주일 단위로 날짜 확인
+- **일/월 단위 이동**: 버튼으로 빠른 날짜 이동
+- **오늘로 이동**: 오늘 날짜로 바로 이동
+
+### 기타
+
+- **현재 시간 표시**: 빨간 선으로 현재 시간 표시
+- **자동 스크롤**: 앱 실행 시 현재 시간 위치로 자동 스크롤
+- **상단 메시지 편집**: 상단의 메시지를 클릭하여 수정 가능
+- **로컬 저장**: 모든 데이터는 브라우저에 자동 저장
+- **총 시간 계산**: 계획/실행 각각의 총 시간 자동 계산
+
+## 기술 스택
+
+- **프레임워크**: Next.js 16 (App Router)
+- **언어**: TypeScript
+- **스타일링**: Tailwind CSS 4
+- **UI 컴포넌트**: shadcn/ui, Lucide Icons
