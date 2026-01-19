@@ -567,7 +567,7 @@ export default function Home() {
       e.stopPropagation();
       if (draggingBlock || hasDragged) return;
       setModalState({
-        mode: "edit",
+        mode: "view",
         type,
         blockId: block.id,
         startMinutes: block.start,
@@ -593,7 +593,7 @@ export default function Home() {
       const dates = groupBlocks.map((b) => b.date).sort();
 
       setModalState({
-        mode: "edit",
+        mode: "view",
         type: "plan",
         blockId: groupId,
         startMinutes: firstBlock.start,
@@ -608,6 +608,11 @@ export default function Home() {
     },
     [planBlocks]
   );
+
+  // Switch to edit mode
+  const handleSwitchToEdit = useCallback(() => {
+    setModalState((prev) => (prev ? { ...prev, mode: "edit" } : null));
+  }, []);
 
   // Save block
   const handleSaveBlock = useCallback(() => {
@@ -930,11 +935,11 @@ export default function Home() {
                 style={{ top: `${currentRow * SLOT_HEIGHT}px` }}
               >
                 <div className="relative">
-                  <span className="absolute -left-12 -top-3 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-semibold text-white">
+                  <span className="absolute -left-[52px] -top-3 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-semibold text-white">
                     {currentLabel}
                   </span>
                   <div className="h-0.5 w-full bg-red-500" />
-                  <span className="absolute -left-5 -top-1.5 h-2 w-2 rounded-full bg-red-500" />
+                  <span className="absolute left-0 -top-1 h-2 w-2 rounded-full bg-red-500" />
                 </div>
               </div>
             </div>
@@ -966,112 +971,131 @@ export default function Home() {
           </div>
         </nav>
 
-        {/* Add/Edit Block Dialog */}
+        {/* Add/Edit/View Block Dialog */}
         <Dialog open={!!modalState} onOpenChange={(open) => !open && setModalState(null)}>
           <DialogContent className="max-w-[350px]">
             <DialogHeader>
               <DialogTitle>
-                {modalState?.mode === "edit"
-                  ? modalState?.isMultiDay
-                    ? "여러 날 일정 수정"
-                    : "일정 수정"
+                {modalState?.mode === "view"
+                  ? modalState.title
+                  : modalState?.mode === "edit"
+                  ? "일정 수정"
                   : modalState?.type === "plan"
                   ? "계획 추가"
                   : "실행 추가"}
               </DialogTitle>
-              {modalState?.mode === "edit" && modalState?.isMultiDay && (
+              {modalState?.isMultiDay && (
                 <p className="text-sm text-zinc-500">
                   {modalState.startDate} ~ {modalState.endDate}
                 </p>
               )}
             </DialogHeader>
 
-            <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
-              <div>
-                <label className="block text-sm font-medium text-zinc-700 mb-1">제목</label>
-                <Input
-                  value={modalState?.title || ""}
-                  onChange={(e) => setModalState((prev) => (prev ? { ...prev, title: e.target.value } : null))}
-                  placeholder="일정 제목"
-                  maxLength={40}
-                />
+            {/* View Mode */}
+            {modalState?.mode === "view" && (
+              <div className="space-y-3 py-2 px-1">
+                <div className={`w-full h-2 rounded ${modalState.color}`} />
+                <div className="flex items-center gap-2 text-sm text-zinc-600">
+                  <span>{formatTimeFromMinutes(modalState.startMinutes)}</span>
+                  <span>~</span>
+                  <span>{formatTimeFromMinutes(modalState.endMinutes)}</span>
+                </div>
+                {modalState.description && (
+                  <p className="text-sm text-zinc-600 whitespace-pre-line">{modalState.description}</p>
+                )}
               </div>
+            )}
 
-              <div>
-                <label className="block text-sm font-medium text-zinc-700 mb-1">설명 (선택)</label>
-                <Textarea
-                  value={modalState?.description || ""}
-                  onChange={(e) =>
-                    setModalState((prev) => (prev ? { ...prev, description: e.target.value } : null))
-                  }
-                  rows={2}
-                  placeholder="상세 설명을 입력하세요"
-                  maxLength={200}
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
+            {/* Add/Edit Mode */}
+            {(modalState?.mode === "add" || modalState?.mode === "edit") && (
+              <div className="space-y-4 py-4 px-1 max-h-[60vh] overflow-y-auto">
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 mb-1">시작 시간</label>
-                  <Select
-                    value={String(modalState?.startMinutes || 0)}
-                    onValueChange={(v) =>
-                      setModalState((prev) => (prev ? { ...prev, startMinutes: Number(v) } : null))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {startTimeOptions.map((m) => (
-                        <SelectItem key={m} value={String(m)}>
-                          {formatTimeFromMinutes(m)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <label className="block text-sm font-medium text-zinc-700 mb-1">제목</label>
+                  <Input
+                    value={modalState?.title || ""}
+                    onChange={(e) => setModalState((prev) => (prev ? { ...prev, title: e.target.value } : null))}
+                    placeholder="일정 제목"
+                    maxLength={40}
+                  />
                 </div>
+
                 <div>
-                  <label className="block text-sm font-medium text-zinc-700 mb-1">종료 시간</label>
-                  <Select
-                    value={String(modalState?.endMinutes || 0)}
-                    onValueChange={(v) =>
-                      setModalState((prev) => (prev ? { ...prev, endMinutes: Number(v) } : null))
+                  <label className="block text-sm font-medium text-zinc-700 mb-1">설명 (선택)</label>
+                  <Textarea
+                    value={modalState?.description || ""}
+                    onChange={(e) =>
+                      setModalState((prev) => (prev ? { ...prev, description: e.target.value } : null))
                     }
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {endTimeOptions.map((m) => (
-                        <SelectItem key={m} value={String(m)}>
-                          {formatTimeFromMinutes(m)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    rows={2}
+                    placeholder="상세 설명을 입력하세요"
+                    maxLength={200}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-700 mb-1">시작 시간</label>
+                    <Select
+                      value={String(modalState?.startMinutes || 0)}
+                      onValueChange={(v) =>
+                        setModalState((prev) => (prev ? { ...prev, startMinutes: Number(v) } : null))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {startTimeOptions.map((m) => (
+                          <SelectItem key={m} value={String(m)}>
+                            {formatTimeFromMinutes(m)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-700 mb-1">종료 시간</label>
+                    <Select
+                      value={String(modalState?.endMinutes || 0)}
+                      onValueChange={(v) =>
+                        setModalState((prev) => (prev ? { ...prev, endMinutes: Number(v) } : null))
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {endTimeOptions.map((m) => (
+                          <SelectItem key={m} value={String(m)}>
+                            {formatTimeFromMinutes(m)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-zinc-700 mb-1">색상</label>
+                  <div className="flex gap-2 flex-wrap">
+                    {COLORS.map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        onClick={() => setModalState((prev) => (prev ? { ...prev, color } : null))}
+                        className={`h-8 w-8 rounded ${color} ${
+                          modalState?.color === color ? "ring-2 ring-blue-500 ring-offset-2" : ""
+                        }`}
+                      />
+                    ))}
+                  </div>
                 </div>
               </div>
+            )}
 
-              <div>
-                <label className="block text-sm font-medium text-zinc-700 mb-1">색상</label>
-                <div className="flex gap-2 flex-wrap">
-                  {COLORS.map((color) => (
-                    <button
-                      key={color}
-                      type="button"
-                      onClick={() => setModalState((prev) => (prev ? { ...prev, color } : null))}
-                      className={`h-8 w-8 rounded ${color} ${
-                        modalState?.color === color ? "ring-2 ring-blue-500 ring-offset-2" : ""
-                      }`}
-                    />
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <DialogFooter className="flex gap-2">
-              {modalState?.mode === "edit" && (
+            {/* View Mode Footer */}
+            {modalState?.mode === "view" && (
+              <DialogFooter className="flex gap-2">
                 <Button
                   variant="destructive"
                   size="sm"
@@ -1079,7 +1103,28 @@ export default function Home() {
                 >
                   <Trash2 className="h-4 w-4 mr-1" /> 삭제
                 </Button>
-              )}
+                <div className="flex-1" />
+                <Button variant="outline" onClick={() => setModalState(null)}>
+                  닫기
+                </Button>
+                <Button onClick={handleSwitchToEdit}>
+                  수정
+                </Button>
+              </DialogFooter>
+            )}
+
+            {/* Add/Edit Mode Footer */}
+            {(modalState?.mode === "add" || modalState?.mode === "edit") && (
+              <DialogFooter className="flex gap-2">
+                {modalState?.mode === "edit" && (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={modalState?.isMultiDay ? handleDeleteMultiDayPlan : handleDeleteBlock}
+                  >
+                    <Trash2 className="h-4 w-4 mr-1" /> 삭제
+                  </Button>
+                )}
               <div className="flex-1" />
               <Button variant="outline" onClick={() => setModalState(null)}>
                 취소
@@ -1094,7 +1139,8 @@ export default function Home() {
               >
                 {modalState?.mode === "edit" ? "저장" : "추가"}
               </Button>
-            </DialogFooter>
+              </DialogFooter>
+            )}
           </DialogContent>
         </Dialog>
       </div>

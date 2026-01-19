@@ -31,7 +31,7 @@ export interface DateSelection {
 }
 
 export interface ModalState {
-  mode: "add" | "edit";
+  mode: "add" | "edit" | "view";
   type: "plan" | "execution";
   blockId?: string;
   startMinutes: number;
