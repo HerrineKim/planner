@@ -113,6 +113,10 @@ const COLORS = [
 ];
 
 const formatTimeFromMinutes = (minutes: number) => {
+  // Handle 24:00 (1440 minutes) as a special case
+  if (minutes >= 24 * 60) {
+    return "24:00";
+  }
   return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 };
 
@@ -250,7 +254,8 @@ export default function Home() {
   const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
   const todayStr = getToday();
 
-  const filteredPlanBlocks = planBlocks.filter(b => b.date === selectedDateStr);
+  // Filter blocks for the selected date, excluding multi-day plans (they show in calendar header only)
+  const filteredPlanBlocks = planBlocks.filter(b => b.date === selectedDateStr && !b.groupId);
   const filteredExecutionBlocks = executionBlocks.filter(b => b.date === selectedDateStr);
 
   // Calculate lanes for overlapping blocks
@@ -449,16 +454,20 @@ export default function Home() {
     const rect = columnRef.current.getBoundingClientRect();
     const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
     const y = clientY - rect.top;
-    const slot = Math.max(0, Math.min(TOTAL_ROWS - 1, Math.floor(y / SLOT_HEIGHT)));
+    // Clamp y to container bounds before calculating slot
+    const clampedY = Math.max(0, Math.min(rect.height, y));
+    const slot = Math.max(0, Math.min(TOTAL_ROWS - 1, Math.floor(clampedY / SLOT_HEIGHT)));
     setSelecting(prev => prev ? { ...prev, currentSlot: slot } : null);
   }, [selecting]);
 
   const handleSelectionEnd = useCallback(() => {
     if (!selecting) return;
     const startSlot = Math.min(selecting.startSlot, selecting.currentSlot);
-    const endSlot = Math.max(selecting.startSlot, selecting.currentSlot) + 1;
+    // Cap endSlot to TOTAL_ROWS (144 slots = 24:00)
+    const endSlot = Math.min(TOTAL_ROWS, Math.max(selecting.startSlot, selecting.currentSlot) + 1);
     const startMinutes = startSlot * MINUTES_PER_SLOT;
-    const endMinutes = endSlot * MINUTES_PER_SLOT;
+    // Cap endMinutes to 24:00 (1440 minutes)
+    const endMinutes = Math.min(24 * 60, endSlot * MINUTES_PER_SLOT);
 
     if (endMinutes - startMinutes >= MINUTES_PER_SLOT) {
       setModalState({
@@ -690,10 +699,10 @@ export default function Home() {
 
   const headerOffset = 44;
 
-  // Selection preview
+  // Selection preview - cap at TOTAL_ROWS to prevent visual overflow
   const selectionPreview = selecting ? {
     startSlot: Math.min(selecting.startSlot, selecting.currentSlot),
-    endSlot: Math.max(selecting.startSlot, selecting.currentSlot) + 1,
+    endSlot: Math.min(TOTAL_ROWS, Math.max(selecting.startSlot, selecting.currentSlot) + 1),
   } : null;
 
   return (
@@ -871,11 +880,11 @@ export default function Home() {
 
               {/* Timeline grids */}
               <div className="mt-2 grid grid-cols-2 gap-2">
-                {/* Plan column */}
+                {/* Plan column - extra 2px height for selection border visibility at bottom */}
                 <div
                   ref={planColumnRef}
                   className="relative overflow-hidden rounded border border-zinc-200 bg-white"
-                  style={{ height: `${TOTAL_ROWS * SLOT_HEIGHT}px` }}
+                  style={{ height: `${TOTAL_ROWS * SLOT_HEIGHT + 2}px` }}
                   onMouseDown={(e) => handleSelectionStart(e, "plan")}
                   onTouchStart={(e) => handleSelectionStart(e, "plan")}
                 >
@@ -942,11 +951,11 @@ export default function Home() {
                   })}
                 </div>
 
-                {/* Execution column */}
+                {/* Execution column - extra 2px height for selection border visibility at bottom */}
                 <div
                   ref={executionColumnRef}
                   className="relative overflow-hidden rounded border border-zinc-200 bg-white"
-                  style={{ height: `${TOTAL_ROWS * SLOT_HEIGHT}px` }}
+                  style={{ height: `${TOTAL_ROWS * SLOT_HEIGHT + 2}px` }}
                   onMouseDown={(e) => handleSelectionStart(e, "execution")}
                   onTouchStart={(e) => handleSelectionStart(e, "execution")}
                 >
@@ -1121,7 +1130,8 @@ export default function Home() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {Array.from({ length: 24 * 6 }, (_, i) => i * 10).map((m) => (
+                      {/* Include 24:00 (1440 minutes) as valid end time */}
+                      {Array.from({ length: 24 * 6 + 1 }, (_, i) => i * 10).map((m) => (
                         <SelectItem key={m} value={String(m)}>
                           {formatTimeFromMinutes(m)}
                         </SelectItem>
@@ -1146,40 +1156,6 @@ export default function Home() {
                 </div>
               </div>
 
-              {modalState?.mode === "add" && modalState?.type === "plan" && (
-                <div className="space-y-2">
-                  <label className="flex items-center gap-2 text-sm font-medium text-zinc-700">
-                    <input
-                      type="checkbox"
-                      checked={modalState?.isMultiDay || false}
-                      onChange={(e) => setModalState(prev => prev ? { ...prev, isMultiDay: e.target.checked } : null)}
-                      className="rounded border-zinc-300"
-                    />
-                    여러 날에 걸쳐 반복
-                  </label>
-                  {modalState?.isMultiDay && (
-                    <div className="grid grid-cols-2 gap-2">
-                      <div>
-                        <label className="block text-xs text-zinc-500 mb-1">시작 날짜</label>
-                        <Input
-                          type="date"
-                          value={modalState?.startDate || selectedDateStr}
-                          onChange={(e) => setModalState(prev => prev ? { ...prev, startDate: e.target.value } : null)}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-zinc-500 mb-1">종료 날짜</label>
-                        <Input
-                          type="date"
-                          value={modalState?.endDate || selectedDateStr}
-                          onChange={(e) => setModalState(prev => prev ? { ...prev, endDate: e.target.value } : null)}
-                          min={modalState?.startDate || selectedDateStr}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
 
             <DialogFooter className="flex gap-2">
