@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import {
   ChevronLeft,
   ChevronRight,
@@ -34,58 +34,37 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-const SLOT_HEIGHT = 16;
-const TOTAL_ROWS = 24 * 6;
-const MINUTES_PER_SLOT = 10;
+import {
+  PlanBlock,
+  DraggingBlock,
+  Selection,
+  DateSelection,
+  ModalState,
+  MultiDayPlan,
+  SLOT_HEIGHT,
+  TOTAL_ROWS,
+  MINUTES_PER_SLOT,
+  MAX_MINUTES,
+  STORAGE_KEYS,
+  COLORS,
+  DAY_NAMES,
+  COLLAPSED_MULTI_DAY_LIMIT,
+} from "./types";
 
-const STORAGE_KEYS = {
-  planBlocks: "planner_planBlocks",
-  executionBlocks: "planner_executionBlocks",
-  topMessage: "planner_topMessage",
-};
+import {
+  formatDate,
+  formatDisplayDate,
+  getToday,
+  getWeekDates,
+  formatTimeFromMinutes,
+  calculateTotalHours,
+  calculateBlockLanes,
+  generateTimeOptions,
+} from "./utils";
 
-interface PlanBlock {
-  id: string;
-  title: string;
-  description?: string;
-  start: number;
-  end: number;
-  color: string;
-  date: string;
-  groupId?: string; // For multi-day plans
-}
+import { TimelineColumn } from "./components/TimelineColumn";
 
-const getToday = () => {
-  const today = new Date();
-  return formatDate(today);
-};
-
-const formatDate = (date: Date): string => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-};
-
-const formatDisplayDate = (date: Date): string => {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}. ${month}. ${day}`;
-};
-
-const getWeekDates = (date: Date): Date[] => {
-  const day = date.getDay();
-  const diff = date.getDate() - day;
-  const weekStart = new Date(date);
-  weekStart.setDate(diff);
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(weekStart);
-    d.setDate(weekStart.getDate() + i);
-    return d;
-  });
-};
-
+// Default data for initial state
 const defaultPlanBlocks: PlanBlock[] = [
   { id: "p1", title: "화학1", description: "원자 기출Pick 화학 1\n32~38", start: 9 * 60, end: 10 * 60 + 20, color: "bg-pink-200", date: getToday() },
   { id: "p2", title: "사회문화 수행", description: "평가 준비", start: 10 * 60 + 20, end: 11 * 60 + 10, color: "bg-green-200", date: getToday() },
@@ -95,77 +74,18 @@ const defaultPlanBlocks: PlanBlock[] = [
 ];
 
 const defaultExecutionBlocks: PlanBlock[] = [
-  { id: "e1", title: "슈퍼에서 우유", description: "사기", start: 9 * 60 + 10, end: 9 * 60 + 50, color: "bg-zinc-200", date: getToday() },
+  { id: "e1", title: "슈퍼에서 우유", description: "사기", start: 9 * 60 + 10, end: 9 * 60 + 50, color: "bg-teal-200", date: getToday() },
   { id: "e2", title: "영어", description: "공통수학1\n쎈 공통수학1", start: 17 * 60, end: 17 * 60 + 40, color: "bg-yellow-200", date: getToday() },
-  { id: "e3", title: "저녁만 먹음", start: 18 * 60, end: 18 * 60 + 20, color: "bg-zinc-200", date: getToday() },
+  { id: "e3", title: "저녁만 먹음", start: 18 * 60, end: 18 * 60 + 20, color: "bg-purple-200", date: getToday() },
   { id: "e4", title: "국어", description: "수능특강 문학\n6~8 강", start: 18 * 60 + 20, end: 19 * 60 + 30, color: "bg-orange-200", date: getToday() },
 ];
 
-const COLORS = [
-  "bg-pink-200",
-  "bg-green-200",
-  "bg-orange-200",
-  "bg-yellow-200",
-  "bg-blue-200",
-  "bg-purple-200",
-  "bg-red-200",
-  "bg-teal-200",
-];
-
-const formatTimeFromMinutes = (minutes: number) => {
-  // Handle 24:00 (1440 minutes) as a special case
-  if (minutes >= 24 * 60) {
-    return "24:00";
-  }
-  return `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
-};
-
-// Calculate lanes for overlapping blocks (side by side display)
-const calculateBlockLanes = (blocks: PlanBlock[]): Map<string, { lane: number; totalLanes: number }> => {
-  const result = new Map<string, { lane: number; totalLanes: number }>();
-  if (blocks.length === 0) return result;
-
-  // Sort blocks by start time
-  const sortedBlocks = [...blocks].sort((a, b) => a.start - b.start);
-
-  // Group overlapping blocks
-  const groups: PlanBlock[][] = [];
-  let currentGroup: PlanBlock[] = [];
-
-  for (const block of sortedBlocks) {
-    if (currentGroup.length === 0) {
-      currentGroup.push(block);
-    } else {
-      // Check if this block overlaps with any block in current group
-      const overlaps = currentGroup.some(
-        (b) => block.start < b.end && block.end > b.start
-      );
-      if (overlaps) {
-        currentGroup.push(block);
-      } else {
-        groups.push(currentGroup);
-        currentGroup = [block];
-      }
-    }
-  }
-  if (currentGroup.length > 0) {
-    groups.push(currentGroup);
-  }
-
-  // Assign lanes within each group
-  for (const group of groups) {
-    const totalLanes = group.length;
-    // Sort by start time within group for consistent lane assignment
-    const sortedGroup = [...group].sort((a, b) => a.start - b.start);
-    sortedGroup.forEach((block, index) => {
-      result.set(block.id, { lane: index, totalLanes });
-    });
-  }
-
-  return result;
-};
+// Memoized time options
+const startTimeOptions = generateTimeOptions(false);
+const endTimeOptions = generateTimeOptions(true);
 
 export default function Home() {
+  // State
   const [isHydrated, setIsHydrated] = useState(false);
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [planBlocks, setPlanBlocks] = useState<PlanBlock[]>(defaultPlanBlocks);
@@ -174,49 +94,91 @@ export default function Home() {
   const [isEditingMessage, setIsEditingMessage] = useState(false);
   const [editingMessageValue, setEditingMessageValue] = useState("");
   const [isMultiDayExpanded, setIsMultiDayExpanded] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
 
-  // Block dragging (moving existing blocks)
-  const [draggingBlock, setDraggingBlock] = useState<{
-    id: string;
-    type: "plan" | "execution";
-    startY: number;
-    originalStart: number;
-    originalEnd: number;
-  } | null>(null);
+  // Interaction state
+  const [draggingBlock, setDraggingBlock] = useState<DraggingBlock | null>(null);
   const [hasDragged, setHasDragged] = useState(false);
+  const [selecting, setSelecting] = useState<Selection | null>(null);
+  const [dateSelecting, setDateSelecting] = useState<DateSelection | null>(null);
+  const [modalState, setModalState] = useState<ModalState | null>(null);
 
-  // Time range selection (for creating new blocks)
-  const [selecting, setSelecting] = useState<{
-    type: "plan" | "execution";
-    startSlot: number;
-    currentSlot: number;
-  } | null>(null);
-
-  // Date range selection (for multi-day plans)
-  const [dateSelecting, setDateSelecting] = useState<{
-    startIndex: number;
-    currentIndex: number;
-  } | null>(null);
-
-  // Modal state
-  const [modalState, setModalState] = useState<{
-    mode: "add" | "edit";
-    type: "plan" | "execution";
-    blockId?: string;
-    startMinutes: number;
-    endMinutes: number;
-    title: string;
-    description: string;
-    color: string;
-    startDate: string;
-    endDate: string;
-    isMultiDay: boolean;
-  } | null>(null);
-
+  // Refs
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const messageInputRef = useRef<HTMLInputElement>(null);
   const planColumnRef = useRef<HTMLDivElement>(null);
   const executionColumnRef = useRef<HTMLDivElement>(null);
+  const draggingInfoRef = useRef<{ id: string; type: "plan" | "execution" } | null>(null);
+
+  // Derived values
+  const selectedDateStr = formatDate(selectedDate);
+  const weekDates = useMemo(() => getWeekDates(selectedDate), [selectedDate]);
+  const todayStr = getToday();
+  const currentMinutes = currentTime.getHours() * 60 + currentTime.getMinutes();
+  const currentRow = currentMinutes / 10;
+  const currentLabel = formatTimeFromMinutes(currentMinutes);
+
+  // Filter blocks for the selected date
+  const filteredPlanBlocks = useMemo(
+    () => planBlocks.filter((b) => b.date === selectedDateStr && !b.groupId),
+    [planBlocks, selectedDateStr]
+  );
+  const filteredExecutionBlocks = useMemo(
+    () => executionBlocks.filter((b) => b.date === selectedDateStr),
+    [executionBlocks, selectedDateStr]
+  );
+
+  // Calculate lanes for overlapping blocks
+  const planBlockLanes = useMemo(
+    () => calculateBlockLanes(filteredPlanBlocks),
+    [filteredPlanBlocks]
+  );
+  const executionBlockLanes = useMemo(
+    () => calculateBlockLanes(filteredExecutionBlocks),
+    [filteredExecutionBlocks]
+  );
+
+  // Multi-day plans calculation
+  const multiDayPlans = useMemo((): MultiDayPlan[] => {
+    const weekDateStrs = weekDates.map((d) => formatDate(d));
+    const groups = new Map<string, PlanBlock[]>();
+
+    planBlocks.forEach((block) => {
+      if (block.groupId) {
+        const existing = groups.get(block.groupId) || [];
+        existing.push(block);
+        groups.set(block.groupId, existing);
+      }
+    });
+
+    const result: MultiDayPlan[] = [];
+    groups.forEach((blocks, groupId) => {
+      const datesInWeek = blocks
+        .filter((b) => weekDateStrs.includes(b.date))
+        .map((b) => weekDateStrs.indexOf(b.date))
+        .filter((idx) => idx !== -1);
+
+      if (datesInWeek.length > 0) {
+        result.push({
+          groupId,
+          title: blocks[0].title,
+          color: blocks[0].color,
+          startIdx: Math.min(...datesInWeek),
+          endIdx: Math.max(...datesInWeek),
+        });
+      }
+    });
+    return result;
+  }, [planBlocks, weekDates]);
+
+  // Selection preview
+  const selectionPreview = useMemo(() => {
+    if (!selecting) return null;
+    return {
+      startSlot: Math.min(selecting.startSlot, selecting.currentSlot),
+      endSlot: Math.min(TOTAL_ROWS, Math.max(selecting.startSlot, selecting.currentSlot) + 1),
+    };
+  }, [selecting]);
 
   // Load from localStorage
   useEffect(() => {
@@ -249,70 +211,13 @@ export default function Home() {
     localStorage.setItem(STORAGE_KEYS.topMessage, topMessage);
   }, [topMessage, isHydrated]);
 
-  const selectedDateStr = formatDate(selectedDate);
-  const weekDates = getWeekDates(selectedDate);
-  const dayNames = ["일", "월", "화", "수", "목", "금", "토"];
-  const todayStr = getToday();
-
-  // Filter blocks for the selected date, excluding multi-day plans (they show in calendar header only)
-  const filteredPlanBlocks = planBlocks.filter(b => b.date === selectedDateStr && !b.groupId);
-  const filteredExecutionBlocks = executionBlocks.filter(b => b.date === selectedDateStr);
-
-  // Calculate lanes for overlapping blocks
-  const planBlockLanes = calculateBlockLanes(filteredPlanBlocks);
-  const executionBlockLanes = calculateBlockLanes(filteredExecutionBlocks);
-
-  // Find multi-day plans that span across the current week
-  const weekDateStrs = weekDates.map(d => formatDate(d));
-  const multiDayPlans = (() => {
-    const groups = new Map<string, PlanBlock[]>();
-    planBlocks.forEach(block => {
-      if (block.groupId) {
-        const existing = groups.get(block.groupId) || [];
-        existing.push(block);
-        groups.set(block.groupId, existing);
-      }
-    });
-
-    const result: { groupId: string; title: string; color: string; startIdx: number; endIdx: number }[] = [];
-    groups.forEach((blocks, groupId) => {
-      const datesInWeek = blocks
-        .filter(b => weekDateStrs.includes(b.date))
-        .map(b => weekDateStrs.indexOf(b.date))
-        .filter(idx => idx !== -1);
-
-      if (datesInWeek.length > 0) {
-        const startIdx = Math.min(...datesInWeek);
-        const endIdx = Math.max(...datesInWeek);
-        result.push({
-          groupId,
-          title: blocks[0].title,
-          color: blocks[0].color,
-          startIdx,
-          endIdx,
-        });
-      }
-    });
-    return result;
-  })();
-
-  const calculateTotalHours = (blocks: PlanBlock[]) => {
-    const totalMinutes = blocks.reduce((acc, block) => acc + (block.end - block.start), 0);
-    return (totalMinutes / 60).toFixed(1);
-  };
-
-  // Current time
-  const [currentTime, setCurrentTime] = useState(new Date());
+  // Update current time every minute
   useEffect(() => {
     const timer = setInterval(() => setCurrentTime(new Date()), 60000);
     return () => clearInterval(timer);
   }, []);
 
-  const currentMinutes = currentTime.getHours() * 60 + currentTime.getMinutes();
-  const currentRow = currentMinutes / 10;
-  const currentLabel = formatTimeFromMinutes(currentMinutes);
-
-  // Auto-scroll to current time
+  // Auto-scroll to current time on mount
   useEffect(() => {
     if (scrollContainerRef.current) {
       const scrollTo = Math.max(0, currentRow * SLOT_HEIGHT - 200);
@@ -322,96 +227,173 @@ export default function Home() {
   }, []);
 
   // Date navigation
-  const goToPrevMonth = () => {
-    const newDate = new Date(selectedDate);
-    newDate.setMonth(newDate.getMonth() - 1);
-    setSelectedDate(newDate);
-  };
+  const goToPrevMonth = useCallback(() => {
+    setSelectedDate((prev) => {
+      const newDate = new Date(prev);
+      newDate.setMonth(newDate.getMonth() - 1);
+      return newDate;
+    });
+  }, []);
 
-  const goToNextMonth = () => {
-    const newDate = new Date(selectedDate);
-    newDate.setMonth(newDate.getMonth() + 1);
-    setSelectedDate(newDate);
-  };
+  const goToNextMonth = useCallback(() => {
+    setSelectedDate((prev) => {
+      const newDate = new Date(prev);
+      newDate.setMonth(newDate.getMonth() + 1);
+      return newDate;
+    });
+  }, []);
 
-  const goToPrevDay = () => {
-    const newDate = new Date(selectedDate);
-    newDate.setDate(newDate.getDate() - 1);
-    setSelectedDate(newDate);
-  };
+  const goToPrevDay = useCallback(() => {
+    setSelectedDate((prev) => {
+      const newDate = new Date(prev);
+      newDate.setDate(newDate.getDate() - 1);
+      return newDate;
+    });
+  }, []);
 
-  const goToNextDay = () => {
-    const newDate = new Date(selectedDate);
-    newDate.setDate(newDate.getDate() + 1);
-    setSelectedDate(newDate);
-  };
+  const goToNextDay = useCallback(() => {
+    setSelectedDate((prev) => {
+      const newDate = new Date(prev);
+      newDate.setDate(newDate.getDate() + 1);
+      return newDate;
+    });
+  }, []);
 
-  const goToToday = () => {
+  const goToToday = useCallback(() => {
     setSelectedDate(new Date());
-  };
+  }, []);
 
   // Message editing
-  const startEditingMessage = () => {
+  const startEditingMessage = useCallback(() => {
     setEditingMessageValue(topMessage);
     setIsEditingMessage(true);
     setTimeout(() => messageInputRef.current?.focus(), 0);
-  };
+  }, [topMessage]);
 
-  const saveMessage = () => {
+  const saveMessage = useCallback(() => {
     if (editingMessageValue.trim()) {
       setTopMessage(editingMessageValue.trim());
     }
     setIsEditingMessage(false);
-  };
+  }, [editingMessageValue]);
 
-  // Block dragging (move existing)
-  const handleBlockDragStart = (
-    e: React.MouseEvent | React.TouchEvent,
-    blockId: string,
-    type: "plan" | "execution"
-  ) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const blocks = type === "plan" ? planBlocks : executionBlocks;
-    const block = blocks.find(b => b.id === blockId);
-    if (!block) return;
+  // Block dragging
+  const handleBlockDragStart = useCallback(
+    (e: React.MouseEvent | React.TouchEvent, blockId: string, type: "plan" | "execution") => {
+      e.preventDefault();
+      e.stopPropagation();
+      const blocks = type === "plan" ? planBlocks : executionBlocks;
+      const block = blocks.find((b) => b.id === blockId);
+      if (!block) return;
 
-    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-    setHasDragged(false);
-    setDraggingBlock({
-      id: blockId,
-      type,
-      startY: clientY,
-      originalStart: block.start,
-      originalEnd: block.end,
-    });
-  };
+      const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+      setHasDragged(false);
+      draggingInfoRef.current = { id: blockId, type };
+      setDraggingBlock({
+        id: blockId,
+        type,
+        startY: clientY,
+        originalStart: block.start,
+        originalEnd: block.end,
+      });
+    },
+    [planBlocks, executionBlocks]
+  );
 
-  const handleBlockDragMove = useCallback((e: MouseEvent | TouchEvent) => {
-    if (!draggingBlock) return;
-    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-    const deltaY = clientY - draggingBlock.startY;
-    const deltaSlots = Math.round(deltaY / SLOT_HEIGHT);
-    const deltaMinutes = deltaSlots * MINUTES_PER_SLOT;
+  const handleBlockDragMove = useCallback(
+    (e: MouseEvent | TouchEvent) => {
+      if (!draggingBlock || !draggingInfoRef.current) return;
+      // Prevent scrolling on touch devices
+      if ("touches" in e) {
+        e.preventDefault();
+      }
+      const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+      const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+      const deltaY = clientY - draggingBlock.startY;
+      const deltaSlots = Math.round(deltaY / SLOT_HEIGHT);
+      const deltaMinutes = deltaSlots * MINUTES_PER_SLOT;
 
-    // Mark as dragged if moved at least one slot
-    if (Math.abs(deltaSlots) > 0) {
-      setHasDragged(true);
-    }
+      if (Math.abs(deltaSlots) > 0) {
+        setHasDragged(true);
+      }
 
-    const duration = draggingBlock.originalEnd - draggingBlock.originalStart;
-    const newStart = Math.max(0, Math.min(24 * 60 - duration, draggingBlock.originalStart + deltaMinutes));
-    const newEnd = newStart + duration;
+      const duration = draggingBlock.originalEnd - draggingBlock.originalStart;
+      const newStart = Math.max(0, Math.min(MAX_MINUTES - duration, draggingBlock.originalStart + deltaMinutes));
+      const newEnd = newStart + duration;
 
-    const setBlocks = draggingBlock.type === "plan" ? setPlanBlocks : setExecutionBlocks;
-    setBlocks(blocks =>
-      blocks.map(b => b.id === draggingBlock.id ? { ...b, start: newStart, end: newEnd } : b)
-    );
-  }, [draggingBlock]);
+      // Use ref for current tracking (synchronous)
+      const currentInfo = draggingInfoRef.current;
+
+      // Detect column switch based on horizontal position
+      const planRect = planColumnRef.current?.getBoundingClientRect();
+      const executionRect = executionColumnRef.current?.getBoundingClientRect();
+
+      let targetType: "plan" | "execution" = currentInfo.type;
+      if (planRect && executionRect) {
+        if (clientX >= planRect.left && clientX <= planRect.right) {
+          targetType = "plan";
+        } else if (clientX >= executionRect.left && clientX <= executionRect.right) {
+          targetType = "execution";
+        }
+      }
+
+      // If column changed, move block between arrays
+      if (targetType !== currentInfo.type) {
+        setHasDragged(true);
+        const newId = `${targetType[0]}${Date.now()}`;
+
+        // Update ref synchronously FIRST to prevent duplicate operations
+        const oldId = currentInfo.id;
+        const oldType = currentInfo.type;
+        draggingInfoRef.current = { id: newId, type: targetType };
+
+        // Remove from source and add to target using functional updates
+        if (oldType === "plan") {
+          setPlanBlocks((blocks) => blocks.filter((b) => b.id !== oldId));
+        } else {
+          setExecutionBlocks((blocks) => blocks.filter((b) => b.id !== oldId));
+        }
+
+        if (targetType === "plan") {
+          setPlanBlocks((blocks) => {
+            // Double-check block doesn't already exist
+            if (blocks.some((b) => b.id === newId)) return blocks;
+            const sourceBlock = oldType === "execution"
+              ? executionBlocks.find((b) => b.id === oldId)
+              : planBlocks.find((b) => b.id === oldId);
+            if (!sourceBlock) return blocks;
+            return [...blocks, { ...sourceBlock, id: newId, start: newStart, end: newEnd }];
+          });
+        } else {
+          setExecutionBlocks((blocks) => {
+            // Double-check block doesn't already exist
+            if (blocks.some((b) => b.id === newId)) return blocks;
+            const sourceBlock = oldType === "plan"
+              ? planBlocks.find((b) => b.id === oldId)
+              : executionBlocks.find((b) => b.id === oldId);
+            if (!sourceBlock) return blocks;
+            return [...blocks, { ...sourceBlock, id: newId, start: newStart, end: newEnd }];
+          });
+        }
+
+        // Update dragging state
+        setDraggingBlock((prev) =>
+          prev ? { ...prev, id: newId, type: targetType } : null
+        );
+      } else {
+        // Same column, just update position
+        const setBlocks = currentInfo.type === "plan" ? setPlanBlocks : setExecutionBlocks;
+        setBlocks((blocks) =>
+          blocks.map((b) => (b.id === currentInfo.id ? { ...b, start: newStart, end: newEnd } : b))
+        );
+      }
+    },
+    [draggingBlock, planBlocks, executionBlocks]
+  );
 
   const handleBlockDragEnd = useCallback(() => {
     setDraggingBlock(null);
-    // Reset hasDragged after a short delay to allow click handler to check it
+    draggingInfoRef.current = null;
     setTimeout(() => setHasDragged(false), 100);
   }, []);
 
@@ -419,7 +401,7 @@ export default function Home() {
     if (draggingBlock) {
       window.addEventListener("mousemove", handleBlockDragMove);
       window.addEventListener("mouseup", handleBlockDragEnd);
-      window.addEventListener("touchmove", handleBlockDragMove);
+      window.addEventListener("touchmove", handleBlockDragMove, { passive: false });
       window.addEventListener("touchend", handleBlockDragEnd);
       return () => {
         window.removeEventListener("mousemove", handleBlockDragMove);
@@ -430,44 +412,58 @@ export default function Home() {
     }
   }, [draggingBlock, handleBlockDragMove, handleBlockDragEnd]);
 
-  // Time range selection (drag to create)
-  const getSlotFromEvent = (e: React.MouseEvent | React.TouchEvent, columnRef: React.RefObject<HTMLDivElement | null>) => {
-    if (!columnRef.current) return 0;
-    const rect = columnRef.current.getBoundingClientRect();
-    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-    const y = clientY - rect.top;
-    return Math.max(0, Math.min(TOTAL_ROWS - 1, Math.floor(y / SLOT_HEIGHT)));
-  };
+  // Time range selection
+  const getSlotFromEvent = useCallback(
+    (e: React.MouseEvent | React.TouchEvent, columnRef: React.RefObject<HTMLDivElement | null>) => {
+      if (!columnRef.current) return 0;
+      const rect = columnRef.current.getBoundingClientRect();
+      const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+      const y = clientY - rect.top;
+      return Math.max(0, Math.min(TOTAL_ROWS - 1, Math.floor(y / SLOT_HEIGHT)));
+    },
+    []
+  );
 
-  const handleSelectionStart = (e: React.MouseEvent | React.TouchEvent, type: "plan" | "execution") => {
-    if (draggingBlock) return;
-    const columnRef = type === "plan" ? planColumnRef : executionColumnRef;
-    const slot = getSlotFromEvent(e, columnRef);
-    setSelecting({ type, startSlot: slot, currentSlot: slot });
-  };
+  const handleSelectionStart = useCallback(
+    (e: React.MouseEvent | React.TouchEvent, type: "plan" | "execution") => {
+      if (draggingBlock) return;
+      // Prevent scrolling on touch devices
+      if ("touches" in e) {
+        e.preventDefault();
+      }
+      const columnRef = type === "plan" ? planColumnRef : executionColumnRef;
+      const slot = getSlotFromEvent(e, columnRef);
+      setSelecting({ type, startSlot: slot, currentSlot: slot });
+    },
+    [draggingBlock, getSlotFromEvent]
+  );
 
-  const handleSelectionMove = useCallback((e: MouseEvent | TouchEvent) => {
-    if (!selecting) return;
-    const columnRef = selecting.type === "plan" ? planColumnRef : executionColumnRef;
-    if (!columnRef.current) return;
+  const handleSelectionMove = useCallback(
+    (e: MouseEvent | TouchEvent) => {
+      if (!selecting) return;
+      // Prevent scrolling on touch devices
+      if ("touches" in e) {
+        e.preventDefault();
+      }
+      const columnRef = selecting.type === "plan" ? planColumnRef : executionColumnRef;
+      if (!columnRef.current) return;
 
-    const rect = columnRef.current.getBoundingClientRect();
-    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-    const y = clientY - rect.top;
-    // Clamp y to container bounds before calculating slot
-    const clampedY = Math.max(0, Math.min(rect.height, y));
-    const slot = Math.max(0, Math.min(TOTAL_ROWS - 1, Math.floor(clampedY / SLOT_HEIGHT)));
-    setSelecting(prev => prev ? { ...prev, currentSlot: slot } : null);
-  }, [selecting]);
+      const rect = columnRef.current.getBoundingClientRect();
+      const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+      const y = clientY - rect.top;
+      const clampedY = Math.max(0, Math.min(rect.height, y));
+      const slot = Math.max(0, Math.min(TOTAL_ROWS - 1, Math.floor(clampedY / SLOT_HEIGHT)));
+      setSelecting((prev) => (prev ? { ...prev, currentSlot: slot } : null));
+    },
+    [selecting]
+  );
 
   const handleSelectionEnd = useCallback(() => {
     if (!selecting) return;
     const startSlot = Math.min(selecting.startSlot, selecting.currentSlot);
-    // Cap endSlot to TOTAL_ROWS (144 slots = 24:00)
     const endSlot = Math.min(TOTAL_ROWS, Math.max(selecting.startSlot, selecting.currentSlot) + 1);
     const startMinutes = startSlot * MINUTES_PER_SLOT;
-    // Cap endMinutes to 24:00 (1440 minutes)
-    const endMinutes = Math.min(24 * 60, endSlot * MINUTES_PER_SLOT);
+    const endMinutes = Math.min(MAX_MINUTES, endSlot * MINUTES_PER_SLOT);
 
     if (endMinutes - startMinutes >= MINUTES_PER_SLOT) {
       setModalState({
@@ -490,7 +486,7 @@ export default function Home() {
     if (selecting) {
       window.addEventListener("mousemove", handleSelectionMove);
       window.addEventListener("mouseup", handleSelectionEnd);
-      window.addEventListener("touchmove", handleSelectionMove);
+      window.addEventListener("touchmove", handleSelectionMove, { passive: false });
       window.addEventListener("touchend", handleSelectionEnd);
       return () => {
         window.removeEventListener("mousemove", handleSelectionMove);
@@ -502,23 +498,29 @@ export default function Home() {
   }, [selecting, handleSelectionMove, handleSelectionEnd]);
 
   // Date range selection for multi-day plans
-  const handleDateSelectionStart = (e: React.MouseEvent | React.TouchEvent, index: number) => {
+  const handleDateSelectionStart = useCallback((e: React.MouseEvent | React.TouchEvent, index: number) => {
     e.preventDefault();
     setDateSelecting({ startIndex: index, currentIndex: index });
-  };
+  }, []);
 
-  const handleDateSelectionMove = useCallback((e: MouseEvent | TouchEvent) => {
-    if (!dateSelecting) return;
-    // Get the element under the cursor
-    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
-    const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
-    const element = document.elementFromPoint(clientX, clientY);
-    const dateButton = element?.closest("[data-date-index]");
-    if (dateButton) {
-      const index = parseInt(dateButton.getAttribute("data-date-index") || "0", 10);
-      setDateSelecting(prev => prev ? { ...prev, currentIndex: index } : null);
-    }
-  }, [dateSelecting]);
+  const handleDateSelectionMove = useCallback(
+    (e: MouseEvent | TouchEvent) => {
+      if (!dateSelecting) return;
+      // Prevent scrolling on touch devices
+      if ("touches" in e) {
+        e.preventDefault();
+      }
+      const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+      const clientY = "touches" in e ? e.touches[0].clientY : e.clientY;
+      const element = document.elementFromPoint(clientX, clientY);
+      const dateButton = element?.closest("[data-date-index]");
+      if (dateButton) {
+        const index = parseInt(dateButton.getAttribute("data-date-index") || "0", 10);
+        setDateSelecting((prev) => (prev ? { ...prev, currentIndex: index } : null));
+      }
+    },
+    [dateSelecting]
+  );
 
   const handleDateSelectionEnd = useCallback(() => {
     if (!dateSelecting) return;
@@ -526,23 +528,19 @@ export default function Home() {
     const endIdx = Math.max(dateSelecting.startIndex, dateSelecting.currentIndex);
 
     if (startIdx !== endIdx) {
-      // Open modal for multi-day plan
-      const startDate = weekDates[startIdx];
-      const endDate = weekDates[endIdx];
       setModalState({
         mode: "add",
         type: "plan",
-        startMinutes: 9 * 60, // Default to 9:00 AM
-        endMinutes: 10 * 60, // Default to 10:00 AM
+        startMinutes: 9 * 60,
+        endMinutes: 10 * 60,
         title: "",
         description: "",
         color: COLORS[Math.floor(Math.random() * COLORS.length)],
-        startDate: formatDate(startDate),
-        endDate: formatDate(endDate),
+        startDate: formatDate(weekDates[startIdx]),
+        endDate: formatDate(weekDates[endIdx]),
         isMultiDay: true,
       });
     } else {
-      // Single date click - just select that date
       setSelectedDate(weekDates[startIdx]);
     }
     setDateSelecting(null);
@@ -552,7 +550,7 @@ export default function Home() {
     if (dateSelecting) {
       window.addEventListener("mousemove", handleDateSelectionMove);
       window.addEventListener("mouseup", handleDateSelectionEnd);
-      window.addEventListener("touchmove", handleDateSelectionMove);
+      window.addEventListener("touchmove", handleDateSelectionMove, { passive: false });
       window.addEventListener("touchend", handleDateSelectionEnd);
       return () => {
         window.removeEventListener("mousemove", handleDateSelectionMove);
@@ -563,42 +561,75 @@ export default function Home() {
     }
   }, [dateSelecting, handleDateSelectionMove, handleDateSelectionEnd]);
 
-  // Edit existing block
-  const handleBlockClick = (e: React.MouseEvent, block: PlanBlock, type: "plan" | "execution") => {
-    e.stopPropagation();
-    // Don't open edit dialog if block was dragged
-    if (draggingBlock || hasDragged) return;
-    setModalState({
-      mode: "edit",
-      type,
-      blockId: block.id,
-      startMinutes: block.start,
-      endMinutes: block.end,
-      title: block.title,
-      description: block.description || "",
-      color: block.color,
-      startDate: block.date,
-      endDate: block.date,
-      isMultiDay: false,
-    });
-  };
+  // Block click handler
+  const handleBlockClick = useCallback(
+    (e: React.MouseEvent, block: PlanBlock, type: "plan" | "execution") => {
+      e.stopPropagation();
+      if (draggingBlock || hasDragged) return;
+      setModalState({
+        mode: "edit",
+        type,
+        blockId: block.id,
+        startMinutes: block.start,
+        endMinutes: block.end,
+        title: block.title,
+        description: block.description || "",
+        color: block.color,
+        startDate: block.date,
+        endDate: block.date,
+        isMultiDay: false,
+      });
+    },
+    [draggingBlock, hasDragged]
+  );
 
-  // Save block (add or edit)
-  const handleSaveBlock = () => {
+  // Multi-day plan click handler
+  const handleMultiDayPlanClick = useCallback(
+    (groupId: string) => {
+      const groupBlocks = planBlocks.filter((b) => b.groupId === groupId);
+      if (groupBlocks.length === 0) return;
+
+      const firstBlock = groupBlocks[0];
+      const dates = groupBlocks.map((b) => b.date).sort();
+
+      setModalState({
+        mode: "edit",
+        type: "plan",
+        blockId: groupId,
+        startMinutes: firstBlock.start,
+        endMinutes: firstBlock.end,
+        title: firstBlock.title,
+        description: firstBlock.description || "",
+        color: firstBlock.color,
+        startDate: dates[0],
+        endDate: dates[dates.length - 1],
+        isMultiDay: true,
+      });
+    },
+    [planBlocks]
+  );
+
+  // Save block
+  const handleSaveBlock = useCallback(() => {
     if (!modalState || !modalState.title.trim()) return;
 
     if (modalState.mode === "edit" && modalState.blockId) {
-      // Update existing block
       const setBlocks = modalState.type === "plan" ? setPlanBlocks : setExecutionBlocks;
-      setBlocks(blocks =>
-        blocks.map(b =>
+      setBlocks((blocks) =>
+        blocks.map((b) =>
           b.id === modalState.blockId
-            ? { ...b, title: modalState.title, description: modalState.description || undefined, start: modalState.startMinutes, end: modalState.endMinutes, color: modalState.color }
+            ? {
+                ...b,
+                title: modalState.title,
+                description: modalState.description || undefined,
+                start: modalState.startMinutes,
+                end: modalState.endMinutes,
+                color: modalState.color,
+              }
             : b
         )
       );
     } else {
-      // Add new block(s)
       const groupId = modalState.isMultiDay ? `group-${Date.now()}` : undefined;
       const newBlock: PlanBlock = {
         id: `${modalState.type[0]}${Date.now()}`,
@@ -625,85 +656,52 @@ export default function Home() {
             });
             currentDate.setDate(currentDate.getDate() + 1);
           }
-          setPlanBlocks(prev => [...prev, ...blocks]);
+          setPlanBlocks((prev) => [...prev, ...blocks]);
         } else {
-          setPlanBlocks(prev => [...prev, newBlock]);
+          setPlanBlocks((prev) => [...prev, newBlock]);
         }
       } else {
-        setExecutionBlocks(prev => [...prev, newBlock]);
+        setExecutionBlocks((prev) => [...prev, newBlock]);
       }
     }
     setModalState(null);
-  };
+  }, [modalState]);
 
   // Delete block
-  const handleDeleteBlock = () => {
+  const handleDeleteBlock = useCallback(() => {
     if (!modalState || !modalState.blockId) return;
     const setBlocks = modalState.type === "plan" ? setPlanBlocks : setExecutionBlocks;
-    setBlocks(blocks => blocks.filter(b => b.id !== modalState.blockId));
+    setBlocks((blocks) => blocks.filter((b) => b.id !== modalState.blockId));
     setModalState(null);
-  };
+  }, [modalState]);
 
-  // Handle clicking on multi-day plan bar
-  const handleMultiDayPlanClick = (groupId: string) => {
-    const groupBlocks = planBlocks.filter(b => b.groupId === groupId);
-    if (groupBlocks.length === 0) return;
-
-    const firstBlock = groupBlocks[0];
-    const dates = groupBlocks.map(b => b.date).sort();
-    const startDate = dates[0];
-    const endDate = dates[dates.length - 1];
-
-    setModalState({
-      mode: "edit",
-      type: "plan",
-      blockId: groupId, // Use groupId as identifier
-      startMinutes: firstBlock.start,
-      endMinutes: firstBlock.end,
-      title: firstBlock.title,
-      description: firstBlock.description || "",
-      color: firstBlock.color,
-      startDate,
-      endDate,
-      isMultiDay: true,
-    });
-  };
-
-  // Delete multi-day plan group
-  const handleDeleteMultiDayPlan = () => {
+  // Delete multi-day plan
+  const handleDeleteMultiDayPlan = useCallback(() => {
     if (!modalState || !modalState.blockId || !modalState.isMultiDay) return;
-    setPlanBlocks(blocks => blocks.filter(b => b.groupId !== modalState.blockId));
+    setPlanBlocks((blocks) => blocks.filter((b) => b.groupId !== modalState.blockId));
     setModalState(null);
-  };
+  }, [modalState]);
 
-  // Save multi-day plan group
-  const handleSaveMultiDayPlan = () => {
+  // Save multi-day plan
+  const handleSaveMultiDayPlan = useCallback(() => {
     if (!modalState || !modalState.blockId || !modalState.isMultiDay || !modalState.title.trim()) return;
 
-    setPlanBlocks(blocks =>
-      blocks.map(b =>
+    setPlanBlocks((blocks) =>
+      blocks.map((b) =>
         b.groupId === modalState.blockId
           ? {
-            ...b,
-            title: modalState.title,
-            description: modalState.description || undefined,
-            start: modalState.startMinutes,
-            end: modalState.endMinutes,
-            color: modalState.color,
-          }
+              ...b,
+              title: modalState.title,
+              description: modalState.description || undefined,
+              start: modalState.startMinutes,
+              end: modalState.endMinutes,
+              color: modalState.color,
+            }
           : b
       )
     );
     setModalState(null);
-  };
-
-  const headerOffset = 44;
-
-  // Selection preview - cap at TOTAL_ROWS to prevent visual overflow
-  const selectionPreview = selecting ? {
-    startSlot: Math.min(selecting.startSlot, selecting.currentSlot),
-    endSlot: Math.min(TOTAL_ROWS, Math.max(selecting.startSlot, selecting.currentSlot) + 1),
-  } : null;
+  }, [modalState]);
 
   return (
     <div className="min-h-screen bg-zinc-100 text-zinc-900">
@@ -724,6 +722,7 @@ export default function Home() {
             </div>
           </div>
 
+          {/* Editable message */}
           <div className="mt-3 text-center">
             {isEditingMessage ? (
               <div className="flex items-center justify-center gap-2">
@@ -737,7 +736,9 @@ export default function Home() {
                   }}
                   className="w-48 text-center text-lg font-semibold"
                 />
-                <Button size="sm" onClick={saveMessage}>저장</Button>
+                <Button size="sm" onClick={saveMessage}>
+                  저장
+                </Button>
                 <Button size="sm" variant="outline" onClick={() => setIsEditingMessage(false)}>
                   <X className="h-4 w-4" />
                 </Button>
@@ -753,6 +754,7 @@ export default function Home() {
             )}
           </div>
 
+          {/* Date navigation */}
           <div className="mt-3 flex items-center justify-center gap-1 text-sm text-zinc-600">
             <Button variant="ghost" size="icon" className="h-8 w-8" onClick={goToPrevMonth} title="이전 달">
               <ChevronsLeft className="h-4 w-4" />
@@ -771,9 +773,17 @@ export default function Home() {
             </Button>
           </div>
 
+          {/* Week calendar */}
           <div className="mt-3 grid grid-cols-7 gap-2 text-center text-xs text-zinc-500">
-            {dayNames.map((day, index) => (
-              <div key={day} className={weekDates[index] && formatDate(weekDates[index]) === selectedDateStr ? "font-semibold text-blue-600" : ""}>
+            {DAY_NAMES.map((day, index) => (
+              <div
+                key={day}
+                className={
+                  weekDates[index] && formatDate(weekDates[index]) === selectedDateStr
+                    ? "font-semibold text-blue-600"
+                    : ""
+                }
+              >
                 {day}
               </div>
             ))}
@@ -781,24 +791,26 @@ export default function Home() {
               const dateStr = formatDate(date);
               const isSelected = dateStr === selectedDateStr;
               const isToday = dateStr === todayStr;
-              const isInDateSelection = dateSelecting && (
-                (index >= Math.min(dateSelecting.startIndex, dateSelecting.currentIndex)) &&
-                (index <= Math.max(dateSelecting.startIndex, dateSelecting.currentIndex))
-              );
+              const isInDateSelection =
+                dateSelecting &&
+                index >= Math.min(dateSelecting.startIndex, dateSelecting.currentIndex) &&
+                index <= Math.max(dateSelecting.startIndex, dateSelecting.currentIndex);
+
               return (
                 <div key={index} className="text-sm text-zinc-700">
                   <button
                     data-date-index={index}
                     onMouseDown={(e) => handleDateSelectionStart(e, index)}
                     onTouchStart={(e) => handleDateSelectionStart(e, index)}
-                    className={`inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors select-none ${isInDateSelection
-                      ? "bg-blue-300 text-white"
-                      : isSelected
+                    className={`inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors select-none ${
+                      isInDateSelection
+                        ? "bg-blue-300 text-white"
+                        : isSelected
                         ? "bg-blue-600 text-white"
                         : isToday
-                          ? "border-2 border-blue-600 text-blue-600"
-                          : "hover:bg-zinc-100"
-                      }`}
+                        ? "border-2 border-blue-600 text-blue-600"
+                        : "hover:bg-zinc-100"
+                    }`}
                   >
                     {date.getDate()}
                   </button>
@@ -807,11 +819,14 @@ export default function Home() {
             })}
           </div>
 
-          {/* Multi-day plan bars - collapsible */}
+          {/* Multi-day plan bars */}
           {multiDayPlans.length > 0 && (
             <div className="mt-2 pb-2">
               <div className="space-y-1">
-                {(isMultiDayExpanded ? multiDayPlans : multiDayPlans.slice(0, 2)).map((plan) => (
+                {(isMultiDayExpanded
+                  ? multiDayPlans
+                  : multiDayPlans.slice(0, COLLAPSED_MULTI_DAY_LIMIT)
+                ).map((plan) => (
                   <div key={plan.groupId} className="relative h-5 grid grid-cols-7 gap-2">
                     <div
                       className={`absolute h-full rounded text-[10px] font-semibold text-zinc-800 flex items-center px-2 truncate cursor-pointer hover:ring-1 hover:ring-blue-400 ${plan.color}`}
@@ -827,7 +842,7 @@ export default function Home() {
                   </div>
                 ))}
               </div>
-              {multiDayPlans.length > 2 && (
+              {multiDayPlans.length > COLLAPSED_MULTI_DAY_LIMIT && (
                 <button
                   onClick={() => setIsMultiDayExpanded(!isMultiDayExpanded)}
                   className="mt-1 flex items-center justify-center w-full text-[10px] text-zinc-500 hover:text-zinc-700"
@@ -840,7 +855,7 @@ export default function Home() {
                   ) : (
                     <>
                       <ChevronDown className="h-3 w-3 mr-0.5" />
-                      {multiDayPlans.length - 2}개 더 보기
+                      {multiDayPlans.length - COLLAPSED_MULTI_DAY_LIMIT}개 더 보기
                     </>
                   )}
                 </button>
@@ -851,24 +866,11 @@ export default function Home() {
         </header>
 
         {/* Scrollable Timeline Section */}
-        <section ref={scrollContainerRef} className="flex-1 overflow-y-auto bg-zinc-50 px-3 py-3">
-          <div className="grid grid-cols-[48px_1fr] gap-2">
-            {/* Time labels column */}
-            <div className="text-[10px] text-zinc-500">
-              {/* Spacer to align with stats header + mt-2 margin */}
-              <div style={{ height: `${headerOffset}px` }} />
-              <div className="grid" style={{ gridTemplateRows: `repeat(24, ${SLOT_HEIGHT * 6}px)` }}>
-                {Array.from({ length: 24 }, (_, hour) => (
-                  <div key={hour} className="flex items-start justify-end pr-1 pt-1">
-                    {String(hour).padStart(2, "0")}:00
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Timeline columns */}
-            <div className="relative">
-              {/* Stats header */}
+        <section className="flex-1 overflow-hidden bg-zinc-50 flex flex-col">
+          {/* Sticky Stats header */}
+          <div className="shrink-0 px-3 pt-3 pb-2 bg-zinc-50">
+            <div className="grid grid-cols-[48px_1fr] gap-2">
+              <div /> {/* Spacer for time labels */}
               <div className="grid grid-cols-2 gap-2 text-center text-xs font-semibold text-zinc-600">
                 <div className="rounded border border-zinc-200 bg-white py-2">
                   계획 <span className="text-blue-600">총 {calculateTotalHours(filteredPlanBlocks)}h</span>
@@ -877,154 +879,55 @@ export default function Home() {
                   실행 <span className="text-blue-600">총 {calculateTotalHours(filteredExecutionBlocks)}h</span>
                 </div>
               </div>
+            </div>
+          </div>
 
-              {/* Timeline grids */}
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                {/* Plan column - extra 2px height for selection border visibility at bottom */}
-                <div
+          {/* Scrollable timeline */}
+          <div ref={scrollContainerRef} className="flex-1 overflow-y-auto px-3 pb-3">
+            <div className="grid grid-cols-[48px_1fr] gap-2">
+              {/* Time labels column */}
+              <div className="text-[10px] text-zinc-500">
+                <div className="grid" style={{ gridTemplateRows: `repeat(24, ${SLOT_HEIGHT * 6}px)` }}>
+                  {Array.from({ length: 24 }, (_, hour) => (
+                    <div key={hour} className="flex items-start justify-end pr-1 pt-1">
+                      {String(hour).padStart(2, "0")}:00
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Timeline columns */}
+              <div className="relative">
+                {/* Timeline grids */}
+                <div className="grid grid-cols-2 gap-2">
+                <TimelineColumn
                   ref={planColumnRef}
-                  className="relative overflow-hidden rounded border border-zinc-200 bg-white"
-                  style={{ height: `${TOTAL_ROWS * SLOT_HEIGHT + 2}px` }}
+                  blocks={filteredPlanBlocks}
+                  blockLanes={planBlockLanes}
+                  selectionPreview={selecting?.type === "plan" ? selectionPreview : null}
+                  draggingBlockId={draggingBlock?.id ?? null}
                   onMouseDown={(e) => handleSelectionStart(e, "plan")}
                   onTouchStart={(e) => handleSelectionStart(e, "plan")}
-                >
-                  {/* Grid lines - lines at :00 (hour) and :30 (half-hour) */}
-                  {Array.from({ length: TOTAL_ROWS }).map((_, index) => {
-                    // Line is drawn at bottom of each slot
-                    // Slot 0 ends at 0:10, slot 2 ends at 0:30, slot 5 ends at 1:00, etc.
-                    const slotEndMinutes = (index + 1) * MINUTES_PER_SLOT;
-                    const isHourLine = slotEndMinutes % 60 === 0; // :00
-                    const isHalfHourLine = slotEndMinutes % 30 === 0 && !isHourLine; // :30
-                    return (
-                      <div
-                        key={index}
-                        className={`absolute left-0 right-0 border-b ${isHourLine
-                          ? "border-zinc-300"
-                          : isHalfHourLine
-                            ? "border-zinc-200"
-                            : "border-dashed border-zinc-100"
-                          }`}
-                        style={{ top: `${(index + 1) * SLOT_HEIGHT}px` }}
-                      />
-                    );
-                  })}
-                  {/* Selection preview */}
-                  {selecting?.type === "plan" && selectionPreview && (
-                    <div
-                      className="absolute left-1 right-1 bg-blue-200/50 border-2 border-blue-400 border-dashed rounded z-20"
-                      style={{
-                        top: `${selectionPreview.startSlot * SLOT_HEIGHT}px`,
-                        height: `${(selectionPreview.endSlot - selectionPreview.startSlot) * SLOT_HEIGHT}px`,
-                      }}
-                    />
-                  )}
-                  {/* Plan blocks - with side-by-side layout for overlapping */}
-                  {filteredPlanBlocks.map((block) => {
-                    const top = (block.start / MINUTES_PER_SLOT) * SLOT_HEIGHT;
-                    const height = ((block.end - block.start) / MINUTES_PER_SLOT) * SLOT_HEIGHT;
-                    const laneInfo = planBlockLanes.get(block.id) || { lane: 0, totalLanes: 1 };
-                    // Leave 15% space on the right for easier new block creation
-                    const maxWidthPercent = 85;
-                    const widthPercent = maxWidthPercent / laneInfo.totalLanes;
-                    const leftPercent = laneInfo.lane * widthPercent;
-                    return (
-                      <div
-                        key={block.id}
-                        className={`absolute rounded px-1 py-0.5 text-left text-[10px] leading-tight font-semibold text-zinc-800 shadow-sm cursor-pointer select-none overflow-hidden flex flex-col ${block.color} ${draggingBlock?.id === block.id ? "opacity-70 ring-2 ring-blue-500 z-30" : "hover:ring-1 hover:ring-blue-300 z-10"
-                          }`}
-                        style={{
-                          top: `${top}px`,
-                          height: `${height}px`,
-                          left: `calc(${leftPercent}% + 2px)`,
-                          width: `calc(${widthPercent}% - 4px)`,
-                        }}
-                        onMouseDown={(e) => handleBlockDragStart(e, block.id, "plan")}
-                        onTouchStart={(e) => handleBlockDragStart(e, block.id, "plan")}
-                        onClick={(e) => handleBlockClick(e, block, "plan")}
-                      >
-                        <div className="truncate font-bold">{block.title}</div>
-                        {block.description && (
-                          <div className="mt-auto whitespace-pre-line text-[9px] opacity-80 overflow-hidden line-clamp-2">{block.description}</div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Execution column - extra 2px height for selection border visibility at bottom */}
-                <div
+                  onBlockDragStart={(e, id) => handleBlockDragStart(e, id, "plan")}
+                  onBlockClick={(e, block) => handleBlockClick(e, block, "plan")}
+                />
+                <TimelineColumn
                   ref={executionColumnRef}
-                  className="relative overflow-hidden rounded border border-zinc-200 bg-white"
-                  style={{ height: `${TOTAL_ROWS * SLOT_HEIGHT + 2}px` }}
+                  blocks={filteredExecutionBlocks}
+                  blockLanes={executionBlockLanes}
+                  selectionPreview={selecting?.type === "execution" ? selectionPreview : null}
+                  draggingBlockId={draggingBlock?.id ?? null}
                   onMouseDown={(e) => handleSelectionStart(e, "execution")}
                   onTouchStart={(e) => handleSelectionStart(e, "execution")}
-                >
-                  {/* Grid lines - lines at :00 (hour) and :30 (half-hour) */}
-                  {Array.from({ length: TOTAL_ROWS }).map((_, index) => {
-                    const slotEndMinutes = (index + 1) * MINUTES_PER_SLOT;
-                    const isHourLine = slotEndMinutes % 60 === 0; // :00
-                    const isHalfHourLine = slotEndMinutes % 30 === 0 && !isHourLine; // :30
-                    return (
-                      <div
-                        key={index}
-                        className={`absolute left-0 right-0 border-b ${isHourLine
-                          ? "border-zinc-300"
-                          : isHalfHourLine
-                            ? "border-zinc-200"
-                            : "border-dashed border-zinc-100"
-                          }`}
-                        style={{ top: `${(index + 1) * SLOT_HEIGHT}px` }}
-                      />
-                    );
-                  })}
-                  {/* Selection preview */}
-                  {selecting?.type === "execution" && selectionPreview && (
-                    <div
-                      className="absolute left-1 right-1 bg-blue-200/50 border-2 border-blue-400 border-dashed rounded z-20"
-                      style={{
-                        top: `${selectionPreview.startSlot * SLOT_HEIGHT}px`,
-                        height: `${(selectionPreview.endSlot - selectionPreview.startSlot) * SLOT_HEIGHT}px`,
-                      }}
-                    />
-                  )}
-                  {/* Execution blocks - with side-by-side layout for overlapping */}
-                  {filteredExecutionBlocks.map((block) => {
-                    const top = (block.start / MINUTES_PER_SLOT) * SLOT_HEIGHT;
-                    const height = ((block.end - block.start) / MINUTES_PER_SLOT) * SLOT_HEIGHT;
-                    const laneInfo = executionBlockLanes.get(block.id) || { lane: 0, totalLanes: 1 };
-                    // Leave 15% space on the right for easier new block creation
-                    const maxWidthPercent = 85;
-                    const widthPercent = maxWidthPercent / laneInfo.totalLanes;
-                    const leftPercent = laneInfo.lane * widthPercent;
-                    return (
-                      <div
-                        key={block.id}
-                        className={`absolute rounded px-1 py-0.5 text-left text-[10px] leading-tight font-semibold text-zinc-800 shadow-sm cursor-pointer select-none overflow-hidden flex flex-col ${block.color} ${draggingBlock?.id === block.id ? "opacity-70 ring-2 ring-blue-500 z-30" : "hover:ring-1 hover:ring-blue-300 z-10"
-                          }`}
-                        style={{
-                          top: `${top}px`,
-                          height: `${height}px`,
-                          left: `calc(${leftPercent}% + 2px)`,
-                          width: `calc(${widthPercent}% - 4px)`,
-                        }}
-                        onMouseDown={(e) => handleBlockDragStart(e, block.id, "execution")}
-                        onTouchStart={(e) => handleBlockDragStart(e, block.id, "execution")}
-                        onClick={(e) => handleBlockClick(e, block, "execution")}
-                      >
-                        <div className="truncate font-bold">{block.title}</div>
-                        {block.description && (
-                          <div className="mt-auto whitespace-pre-line text-[9px] opacity-80 overflow-hidden line-clamp-2">{block.description}</div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                  onBlockDragStart={(e, id) => handleBlockDragStart(e, id, "execution")}
+                  onBlockClick={(e, block) => handleBlockClick(e, block, "execution")}
+                />
               </div>
 
               {/* Current time indicator */}
               <div
                 className="pointer-events-none absolute left-0 right-0"
-                style={{ top: `${currentRow * SLOT_HEIGHT + headerOffset}px` }}
+                style={{ top: `${currentRow * SLOT_HEIGHT}px` }}
               >
                 <div className="relative">
                   <span className="absolute -left-12 -top-3 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-semibold text-white">
@@ -1035,6 +938,7 @@ export default function Home() {
                 </div>
               </div>
             </div>
+          </div>
           </div>
         </section>
 
@@ -1050,8 +954,9 @@ export default function Home() {
             ].map((item) => (
               <div key={item.label} className="flex flex-col items-center gap-1">
                 <span
-                  className={`flex h-9 w-9 items-center justify-center rounded-full border ${item.active ? "border-blue-600 bg-blue-600 text-white" : "border-zinc-200"
-                    }`}
+                  className={`flex h-9 w-9 items-center justify-center rounded-full border ${
+                    item.active ? "border-blue-600 bg-blue-600 text-white" : "border-zinc-200"
+                  }`}
                 >
                   <item.icon className="h-4 w-4" />
                 </span>
@@ -1071,8 +976,8 @@ export default function Home() {
                     ? "여러 날 일정 수정"
                     : "일정 수정"
                   : modalState?.type === "plan"
-                    ? "계획 추가"
-                    : "실행 추가"}
+                  ? "계획 추가"
+                  : "실행 추가"}
               </DialogTitle>
               {modalState?.mode === "edit" && modalState?.isMultiDay && (
                 <p className="text-sm text-zinc-500">
@@ -1081,13 +986,14 @@ export default function Home() {
               )}
             </DialogHeader>
 
-            <div className="space-y-4 py-4">
+            <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
               <div>
                 <label className="block text-sm font-medium text-zinc-700 mb-1">제목</label>
                 <Input
                   value={modalState?.title || ""}
-                  onChange={(e) => setModalState(prev => prev ? { ...prev, title: e.target.value } : null)}
+                  onChange={(e) => setModalState((prev) => (prev ? { ...prev, title: e.target.value } : null))}
                   placeholder="일정 제목"
+                  maxLength={40}
                 />
               </div>
 
@@ -1095,9 +1001,12 @@ export default function Home() {
                 <label className="block text-sm font-medium text-zinc-700 mb-1">설명 (선택)</label>
                 <Textarea
                   value={modalState?.description || ""}
-                  onChange={(e) => setModalState(prev => prev ? { ...prev, description: e.target.value } : null)}
+                  onChange={(e) =>
+                    setModalState((prev) => (prev ? { ...prev, description: e.target.value } : null))
+                  }
                   rows={2}
                   placeholder="상세 설명을 입력하세요"
+                  maxLength={200}
                 />
               </div>
 
@@ -1106,13 +1015,15 @@ export default function Home() {
                   <label className="block text-sm font-medium text-zinc-700 mb-1">시작 시간</label>
                   <Select
                     value={String(modalState?.startMinutes || 0)}
-                    onValueChange={(v) => setModalState(prev => prev ? { ...prev, startMinutes: Number(v) } : null)}
+                    onValueChange={(v) =>
+                      setModalState((prev) => (prev ? { ...prev, startMinutes: Number(v) } : null))
+                    }
                   >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {Array.from({ length: 24 * 6 }, (_, i) => i * 10).map((m) => (
+                      {startTimeOptions.map((m) => (
                         <SelectItem key={m} value={String(m)}>
                           {formatTimeFromMinutes(m)}
                         </SelectItem>
@@ -1124,14 +1035,15 @@ export default function Home() {
                   <label className="block text-sm font-medium text-zinc-700 mb-1">종료 시간</label>
                   <Select
                     value={String(modalState?.endMinutes || 0)}
-                    onValueChange={(v) => setModalState(prev => prev ? { ...prev, endMinutes: Number(v) } : null)}
+                    onValueChange={(v) =>
+                      setModalState((prev) => (prev ? { ...prev, endMinutes: Number(v) } : null))
+                    }
                   >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {/* Include 24:00 (1440 minutes) as valid end time */}
-                      {Array.from({ length: 24 * 6 + 1 }, (_, i) => i * 10).map((m) => (
+                      {endTimeOptions.map((m) => (
                         <SelectItem key={m} value={String(m)}>
                           {formatTimeFromMinutes(m)}
                         </SelectItem>
@@ -1148,14 +1060,14 @@ export default function Home() {
                     <button
                       key={color}
                       type="button"
-                      onClick={() => setModalState(prev => prev ? { ...prev, color } : null)}
-                      className={`h-8 w-8 rounded ${color} ${modalState?.color === color ? "ring-2 ring-blue-500 ring-offset-2" : ""
-                        }`}
+                      onClick={() => setModalState((prev) => (prev ? { ...prev, color } : null))}
+                      className={`h-8 w-8 rounded ${color} ${
+                        modalState?.color === color ? "ring-2 ring-blue-500 ring-offset-2" : ""
+                      }`}
                     />
                   ))}
                 </div>
               </div>
-
             </div>
 
             <DialogFooter className="flex gap-2">
@@ -1169,9 +1081,15 @@ export default function Home() {
                 </Button>
               )}
               <div className="flex-1" />
-              <Button variant="outline" onClick={() => setModalState(null)}>취소</Button>
+              <Button variant="outline" onClick={() => setModalState(null)}>
+                취소
+              </Button>
               <Button
-                onClick={modalState?.mode === "edit" && modalState?.isMultiDay ? handleSaveMultiDayPlan : handleSaveBlock}
+                onClick={
+                  modalState?.mode === "edit" && modalState?.isMultiDay
+                    ? handleSaveMultiDayPlan
+                    : handleSaveBlock
+                }
                 disabled={!modalState?.title?.trim()}
               >
                 {modalState?.mode === "edit" ? "저장" : "추가"}
